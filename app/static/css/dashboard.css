@@ -1,0 +1,15 @@
+[data-testid="metric-container"] {
+    background-color: #f0f2f6;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+/* Filtros en sidebar */
+.st-expander {
+    background-color: #e8f0fe;
+}
+
+/* Tablas de riesgo */
+.stDataFrame [data-testid="stDataFrame"] {
+    border: 2px solid #ff0000;
+}

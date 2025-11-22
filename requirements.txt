@@ -1,0 +1,10 @@
+streamlit
+streamlit-authenticator
+supabase
+python-dotenv
+pandas
+plotly
+Pillow
+openpyxl
+reportlab
+python-multipart
