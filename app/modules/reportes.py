@@ -37,6 +37,7 @@ def mostrar(usuario):
     ])
     
     data = cargar_datos_reporte(filtros)
+    
     if not data:
         st.error("No se pudieron cargar los datos del reporte")
         return
@@ -183,7 +184,8 @@ def mostrar_resumen_ejecutivo(data, filtros):
     # Gráfico de tendencia de incidentes
     st.subheader("Tendencia de Incidentes")
     if not data['incidentes'].empty:
-        data['incidentes']['mes'] = pd.to_datetime(data['incidentes']['fecha_hora']).dt.to_period('M')
+        data['incidentes']['mes'] = pd.to_datetime(data['incidentes']['fecha_hora']).dt.to_period('M').astype(str)
+        
         tendencia = data['incidentes'].groupby('mes').size()
         fig = px.line(tendencia, title="Incidentes por Mes", labels={'value': 'N° Incidentes'})
         fig.update_traces(mode='lines+markers')
@@ -274,19 +276,32 @@ def mostrar_matriz_riesgos_interactiva(data, filtros):
         (data['riesgos']['tipo_peligro'].isin(tipo_peligro))
     ]
     
+    
     # Matriz de riesgo (probabilidad vs severidad)
     st.subheader("📊 Mapa de Calor de Riesgo")
     
     # Crear matriz 5x5
     matriz = riesgos_filtrados.groupby(['probabilidad', 'severidad']).size().unstack(fill_value=0)
     
-    fig = px.imshow(matriz.values,
+    rango_1_5 = [1,2,3,4,5]
+    
+    matriz = matriz.reindex(
+        index=rango_1_5,
+        columns=rango_1_5,
+        fill_value=0
+    )
+    
+    fig = px.imshow(matriz,
+                    labels=dict(x="Severidad", y="Probabilidad", color="Cantidad"),
                     x=['Baja (1)', 'Media (2)', 'Moderada (3)', 'Alta (4)', 'Muy Alta (5)'],
                     y=['Casi Nula (1)', 'Remota (2)', 'Posible (3)', 'Probable (4)', 'Muy Probable (5)'],
+                    text_auto=True,
                     title="Matriz de Riesgo: Probabilidad vs Severidad",
-                    color_continuous_scale="Reds")
-    fig.update_xaxes(title="Severidad")
-    fig.update_yaxes(title="Probabilidad")
+                    color_continuous_scale="Reds",
+                    origin='lower')
+    fig.update_xaxes(side="bottom")
+    #fig.update_xaxes(title="Severidad")
+    #fig.update_yaxes(title="Probabilidad")
     st.plotly_chart(fig, use_container_width=True)
     
     # Tabla de riesgos críticos
@@ -450,8 +465,8 @@ def generar_reporte_pdf(data, tipo, filtros):
     )
     
     elements.append(Paragraph("REPORTE DE SEGURIDAD Y SALUD EN EL TRABAJO", title_style))
-    elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['normal']))
-    elements.append(Paragraph(f"Ley 29783 - Período: {filtros['fecha_inicio']} al {filtros['fecha_fin']}", styles['normal']))
+    elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['Normal']))
+    elements.append(Paragraph(f"Ley 29783 - Período: {filtros['fecha_inicio']} al {filtros['fecha_fin']}", styles['Normal']))
     elements.append(Spacer(1, 30))
     
     # KP
@@ -479,14 +494,31 @@ def generar_reporte_pdf(data, tipo, filtros):
     
     # Tabla de incidentes
     if not data['incidentes'].empty:
-        elements.append(Paragraph("DETALLE DE INCIDENTES", styles['heading2']))
-        incidentes_pdf = data['incidentes'][['codigo', 'tipo', 'area', 'descripcion']].head(10)
-        incidentes_data = [incidentes_pdf.columns.tolist()] + incidentes_pdf.values.tolist()
-        incidentes_table = Table(incidentes_data, colWidths=[80, 80, 100, 250])
+        # 3. CORRECCIÓN: 'Heading2' con mayúscula
+        elements.append(Paragraph("DETALLE DE INCIDENTES", styles['Heading2']))
+        
+        # Seleccionamos columnas y convertimos a listas
+        incidentes_subset = data['incidentes'][['codigo', 'tipo', 'area', 'descripcion']].head(10)
+        
+        # Encabezados
+        data_table = [['CÓDIGO', 'TIPO', 'ÁREA', 'DESCRIPCIÓN']]
+        
+        # Filas: IMPORTANTE convertir texto largo a Paragraph para que haga salto de línea automático
+        for _, row in incidentes_subset.iterrows():
+            descripcion_flowable = Paragraph(str(row['descripcion']), styles['Normal']) # Ajuste de texto
+            data_table.append([
+                row['codigo'],
+                row['tipo'],
+                row['area'],
+                descripcion_flowable # Usamos el Paragraph aquí
+            ])
+
+        incidentes_table = Table(data_table, colWidths=[60, 80, 80, 280]) # Ajusté anchos
         incidentes_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#6c757d')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'), # Alinear texto arriba
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#dee2e6'))
         ]))

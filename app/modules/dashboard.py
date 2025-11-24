@@ -105,6 +105,7 @@ def cargar_datos_dashboard(filtros):
     try:
         # Cargar riesgos
         query_riesgos = supabase.table('riesgos').select('*')
+        
         if filtros['areas']:
             query_riesgos = query_riesgos.in_('area', filtros['areas'])
         
@@ -410,7 +411,7 @@ def mostrar_reportes_legales(data, filtros):
     
     # Calcular tasas
     accidentes = len(data['incidentes'][data['incidentes']['tipo'] == 'accidente'])
-    dias_perdidos = accidentos * 15  # Simulación (en realidad debería ser campo calculado)
+    dias_perdidos = accidentes * 15  # Simulación (en realidad debería ser campo calculado)
     
     tasa_frecuencia = calcular_tasa_frecuencia(accidentes, horas_hombre_mes)
     tasa_severidad = calcular_tasa_severidad(dias_perdidos, horas_hombre_mes)

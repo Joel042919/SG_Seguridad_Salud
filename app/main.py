@@ -5,7 +5,7 @@ sys.path.append(".")
 from app.auth import autenticar_usuario
 from app.modules import (
     riesgos, inspecciones, capacitaciones, 
-    incidentes, epp, documental, reportes
+    incidentes, epp, documental, reportes, dashboard
 )
 
 with open("app/static/css/dashboard.css") as f:
@@ -46,7 +46,7 @@ def main():
     
     # Router de módulos
     if modulo == "🏠 Dashboard":
-        mostrar_dashboard(usuario)
+        dashboard.mostrar(usuario)
     elif "Riesgos" in modulo:
         riesgos.mostrar(usuario)
     elif "Inspecciones" in modulo:
@@ -61,24 +61,7 @@ def main():
         documental.mostrar(usuario)
     elif "Reportes" in modulo:
         reportes.mostrar(usuario)
-
-def mostrar_dashboard(usuario):
-    st.title("Dashboard SST - Ley 29783")
     
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Riesgos Pendientes", "12", "+3")
-    with col2:
-        st.metric("Inspecciones Hoy", "5", "0")
-    with col3:
-        st.metric("Incidentes Mes", "3", "-2")
-    with col4:
-        st.metric("EPP por Vencer", "8", "+1")
-    
-    # Gráfico de riesgos por área
-    st.subheader("Nivel de Riesgo por Área")
-    # (Aquí iría código para generar gráfico con plotly)
 
 if __name__ == "__main__":
     main()

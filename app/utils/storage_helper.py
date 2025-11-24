@@ -2,6 +2,10 @@ import streamlit as st
 from supabase import create_client
 import uuid
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def subir_archivo_storage(archivo, bucket, carpeta):
     """
@@ -20,8 +24,8 @@ def subir_archivo_storage(archivo, bucket, carpeta):
     
     try:
         supabase = create_client(
-            st.secrets["SUPABASE_URL"],
-            st.secrets["SUPABASE_SERVICE_KEY"]  # Usar service key para upload
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_KEY")  # Usar service key para upload
         )
         
         # Generar nombre único
@@ -52,8 +56,8 @@ def eliminar_archivo_storage(url_publica, bucket):
     """Eliminar archivo por URL pública"""
     try:
         supabase = create_client(
-            st.secrets["SUPABASE_URL"],
-            st.secrets["SUPABASE_SERVICE_KEY"]
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_KEY")  # Usar service key para upload
         )
         
         # Extraer ruta del URL

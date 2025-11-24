@@ -75,7 +75,7 @@ def repositorio_documental(usuario):
     col_filtro4, col_filtro5 = st.columns(2)
     
     with col_filtro4:
-        areas = supabase.table('usuarios').select('area').execute().data
+        areas = supabase.table('areas').select('area').execute().data
         areas_unicas = sorted(list(set([a['area'] for a in areas if a['area']])))
         area_filtro = st.multiselect(
             "Área Aplicación",
@@ -247,7 +247,7 @@ def subir_editar_documento(usuario):
             )
             
             # Obtener áreas disponibles
-            areas = supabase.table('usuarios').select('area').execute().data
+            areas = supabase.table('areas').select('area').execute().data
             areas_unicas = sorted(list(set([a['area'] for a in areas if a['area']])))
             area = st.selectbox(
                 "Área de Aplicación",
