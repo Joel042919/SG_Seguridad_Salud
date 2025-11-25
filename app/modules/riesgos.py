@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime, timedelta
 from app.utils.supabase_client import get_supabase_client
 from app.auth import requerir_rol
 import plotly.express as px
-import os
-from dotenv import load_dotenv
-load_dotenv()
+import random
 
 def mostrar(usuario):
     """Módulo de Gestión de Riesgos (Ley 29783 Art. 26-28)"""
@@ -14,9 +13,9 @@ def mostrar(usuario):
     st.title("⚠️ Gestión de Riesgos Laborales")
     
     tab1, tab2, tab3 = st.tabs([
-        "📝 Registrar Riesgo",
-        "📋 Listar Riesgos",
-        "📊 Dashboard"
+        "📝 Registrar Riesgo (IPERC)",
+        "📋 Matriz de Riesgos",
+        "📊 Dashboard Ejecutivo"
     ])
     
     with tab1:
@@ -28,178 +27,283 @@ def mostrar(usuario):
     with tab3:
         dashboard_riesgos()
 
+def calcular_nivel(prob, sev):
+    """Calcula nivel y etiqueta según matriz IPERC estándar"""
+    producto = prob * sev
+    if producto <= 6:
+        return producto, "Riesgo Bajo"
+    elif producto <= 12:
+        return producto, "Riesgo Medio"
+    else:
+        return producto, "Riesgo Alto"
+
 def registrar_riesgo(usuario):
     """Formulario dinámico de evaluación de riesgos"""
     
+    st.subheader("Identificación de Peligros y Evaluación de Riesgos")
+    st.caption("Complete la información para la matriz IPERC")
+    
     supabase = get_supabase_client()
     
-    # Consultar usuarios
-    response = supabase.table('usuarios').select('id, nombre_completo').execute()
-    
-    if response.data:
-        usuarios = response.data
-    else:
-        usuarios = []
-    
-    with st.form("form_riesgo", clear_on_submit=True):
-        st.subheader("Evaluación de Riesgo")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            area = st.selectbox("Área", ["Producción", "Almacén", "Oficinas", "Mantenimiento"])
-            puesto = st.text_input("Puesto de Trabajo")
-            actividad = st.text_area("Actividad")
-        
-        with col2:
-            peligro = st.text_area("Peligro Identificado")
-            tipo_peligro = st.selectbox(
-                "Tipo de Peligro",
-                ["Físico", "Químico", "Biológico", "Ergonómico", "Psicosocial", "Mecánico"]
-            )
-        
-        st.markdown("### Matriz de Riesgo")
-        col3, col4 = st.columns(2)
-        
-        with col3:
-            probabilidad = st.slider("Probabilidad (1-5)", 1, 5, 3,
-                help="1=Muy baja, 5=Muy alta")
-            severidad = st.slider("Severidad (1-5)", 1, 5, 3,
-                help="1=Leve, 5=Catastrófico")
-        
-        nivel_riesgo = probabilidad * severidad
-        
-        with col4:
-            st.metric("NIVEL DE RIESGO", nivel_riesgo)
-            if nivel_riesgo >= 15:
-                st.error("🚨 RIESGO ALTO - Requiere control inmediato")
-            elif nivel_riesgo >= 8:
-                st.warning("⚠️ RIESGO MEDIO - Requiere control a corto plazo")
-            else:
-                st.success("✅ RIESGO BAJO - Control estándar")
-        
-        controles = st.text_area("Controles Actuales")
-        responsable = st.selectbox("Responsable", usuarios, format_func=lambda x: x['nombre_completo'])
-        
-        submitted = st.form_submit_button("💾 Guardar Evaluación")
-        
-        if submitted:
-            guardar_riesgo({
-                'area': area,
-                'puesto_trabajo': puesto,
-                'actividad': actividad,
-                'peligro': peligro,
-                'tipo_peligro': tipo_peligro,
-                'probabilidad': probabilidad,
-                'severidad': severidad,
-                'controles_actuales': controles,
-                'responsable_id': responsable['id']
-            })
-            st.success("✅ Riesgo registrado exitosamente")
-
-def guardar_riesgo(data):
-    """Guarda en Supabase y dispara webhook de n8n"""
-    supabase = get_supabase_client()
-    
-    # Generar código único
-    codigo = f"R-{pd.Timestamp.now().strftime('%Y%m%d')}-{hash(data['peligro'])%1000:03d}"
-    data['codigo'] = codigo
-    
+    # 1. Cargar Datos Maestros (Usuarios y Áreas)
     try:
-        # Insertar en BD
-        supabase.table('riesgos').insert(data).execute()
+        users_resp = supabase.table('usuarios').select('id, nombre_completo').eq('activo', True).execute()
+        lista_usuarios = {u['nombre_completo']: u['id'] for u in users_resp.data} if users_resp.data else {}
         
-        # Disparar webhook de n8n
-        import requests
-        requests.post(
-            os.getenv("N8N_WEBHOOK_URL") + "riesgo-nuevo",
-            json={"codigo": codigo, "nivel_riesgo": data['probabilidad'] * data['severidad']}
-        )
-        
+        areas_resp = supabase.table('areas').select('area').execute()
+        lista_areas = [a['area'] for a in areas_resp.data] if areas_resp.data else ["Producción", "Almacén", "Oficinas", "Mantenimiento"]
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
+        st.error(f"Error cargando maestros: {e}")
+        return
+
+    # --- NOTA IMPORTANTE: Eliminamos st.form para permitir interactividad en tiempo real ---
+    
+    # --- SECCIÓN 1: Identificación ---
+    st.markdown("### 1. Identificación del Peligro")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Generador de código simple (simulado)
+        cod_sufijo = datetime.now().strftime('%m%d%H%M')
+        # Usamos key para mantener el estado si es necesario
+        codigo = st.text_input("Código IPERC", value=f"RIE-GEN-{cod_sufijo}", key="risk_code")
+        area = st.selectbox("Área", lista_areas, key="risk_area")
+        puesto = st.text_input("Puesto de Trabajo", placeholder="Ej: Operario de Troqueladora", key="risk_puesto")
+        
+    with col2:
+        actividad = st.text_area("Actividad / Tarea", placeholder="Descripción breve de la tarea", height=108, key="risk_act")
+        
+    col3, col4 = st.columns(2)
+    with col3:
+        peligro = st.text_input("Peligro", placeholder="Ej: Ruido excesivo, Piso resbaloso", key="risk_peligro")
+    with col4:
+        tipo_peligro = st.selectbox("Tipo de Peligro", 
+            ["Físico", "Químico", "Biológico", "Ergonómico", "Mecánico", "Eléctrico", "Locativo", "Psicosocial"], key="risk_type")
+
+    st.markdown("---")
+    
+    # --- SECCIÓN 2: Evaluación (Matriz) ---
+    st.markdown("### 2. Evaluación de Riesgo Puro")
+    st.caption("Ajuste los valores para ver el nivel de riesgo calculado en tiempo real.")
+    
+    c_prob, c_sev, c_res = st.columns([1, 1, 2])
+    
+    with c_prob:
+        # Sliders interactivos (Inician en 1)
+        prob = st.slider("Probabilidad (1-5)", 1, 5, 1, help="1: Muy Raro ... 5: Casi Seguro", key="risk_prob")
+    with c_sev:
+        sev = st.slider("Severidad (1-5)", 1, 5, 1, help="1: Insignificante ... 5: Catastrófico", key="risk_sev")
+        
+    # Cálculo en tiempo real (Ahora sí funciona porque no hay st.form bloqueándolo)
+    nivel_val, nivel_txt = calcular_nivel(prob, sev)
+    
+    with c_res:
+        # Mostramos el resultado dinámico
+        if nivel_txt == "Riesgo Alto":
+            st.error(f"🚨 **Nivel {nivel_val}: {nivel_txt}**\n\nRequiere controles inmediatos o paralización.")
+        elif nivel_txt == "Riesgo Medio":
+            st.warning(f"⚠️ **Nivel {nivel_val}: {nivel_txt}**\n\nRequiere medidas de mitigación y monitoreo.")
+        else:
+            st.success(f"✅ **Nivel {nivel_val}: {nivel_txt}**\n\nEl riesgo es tolerable, mantener controles básicos.")
+
+    st.markdown("---")
+
+    # --- SECCIÓN 3: Controles ---
+    st.markdown("### 3. Medidas de Control")
+    controles = st.text_area("Controles Actuales / Propuestos", placeholder="Ej: Uso de EPP, Guardas de seguridad...", key="risk_ctrl")
+    
+    col_resp, col_est = st.columns(2)
+    with col_resp:
+        nom_responsable = st.selectbox("Responsable de Implementación", options=list(lista_usuarios.keys()), key="risk_resp")
+    with col_est:
+        estado = st.selectbox("Estado de Implementación", ["pendiente", "en_mitigacion", "controlado"], key="risk_status")
+        
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        fecha_eval = st.date_input("Fecha Evaluación", value=datetime.now(), key="risk_date1")
+    with col_f2:
+        prox_rev = st.date_input("Próxima Revisión", value=datetime.now() + timedelta(days=365), key="risk_date2")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Botón de guardado fuera del form
+    if st.button("💾 Registrar en Matriz IPERC", type="primary", use_container_width=True):
+        if not puesto or not peligro:
+            st.error("❌ Falta información obligatoria (Puesto o Peligro)")
+            return
+        
+        # Preparar datos exactos para tu tabla
+        datos_riesgo = {
+            "codigo": codigo,
+            "area": area,
+            "puesto_trabajo": puesto,
+            "actividad": actividad,
+            "peligro": peligro,
+            "tipo_peligro": tipo_peligro,
+            "probabilidad": prob,
+            "severidad": sev,
+            # "nivel_riesgo": nivel_val,       # Calculado
+            # "evaluacion_riesgo": nivel_txt,  # Texto calculado
+            "controles_actuales": controles,
+            "estado": estado,
+            "responsable_id": lista_usuarios[nom_responsable], # UUID del usuario
+            "fecha_evaluacion": fecha_eval.isoformat(),
+            "proxima_revision": prox_rev.isoformat()
+        }
+        
+        try:
+            supabase.table('riesgos').insert(datos_riesgo).execute()
+            st.success(f"✅ Riesgo {codigo} registrado correctamente")
+            # Opcional: Limpiar campos recargando o usando session state, 
+            # pero por simplicidad mostramos éxito.
+        except Exception as e:
+            st.error(f"Error al guardar en BD: {e}")
 
 def listar_riesgos(usuario):
-    """Tabla interactiva de riesgos"""
+    """Vista de Matriz IPERC"""
+    st.subheader("📋 Matriz de Riesgos (IPERC)")
     
     supabase = get_supabase_client()
     
     # Filtros
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        filtro_area = st.multiselect("Filtrar por Área", 
-            ["Producción", "Almacén", "Oficinas", "Mantenimiento"])
-    with col2:
-        filtro_estado = st.selectbox("Estado", ["todos", "pendiente", "en_mitigacion", "controlado"])
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        filtro_area = st.selectbox("Filtrar por Área", ["Todas"] + ["Producción", "Almacén", "Oficinas", "Mantenimiento", "Logística", "Seguridad", "Limpieza", "Comedor", "Laboratorio", "Exteriores"])
+    with col_f2:
+        filtro_nivel = st.selectbox("Nivel de Riesgo", ["Todos", "Riesgo Alto", "Riesgo Medio", "Riesgo Bajo"])
     
-    # Consulta
-    query = supabase.table('riesgos').select('*, usuarios(nombre_completo)')
+    # Query base
+    query = supabase.table('riesgos').select('*')
     
-    if filtro_area:
-        query = query.in_('area', filtro_area)
-    if filtro_estado != "todos":
-        query = query.eq('estado', filtro_estado)
+    if filtro_area != "Todas":
+        query = query.eq('area', filtro_area)
+    if filtro_nivel != "Todos":
+        query = query.eq('evaluacion_riesgo', filtro_nivel)
+        
+    riesgos = query.execute().data
     
-    response = query.execute()
+    if not riesgos:
+        st.info("No se encontraron registros con esos filtros.")
+        return
+        
+    df = pd.DataFrame(riesgos)
     
-    if response.data:
-        df = pd.DataFrame(response.data)
-        
-        # Columnas para la tabla
-        df_display = df[['codigo', 'area', 'puesto_trabajo', 'peligro', 
-                         'nivel_riesgo', 'estado', 'usuarios']].copy()
-        
-        # Aplicar colores según nivel
-        def color_riesgo(val):
-            if val >= 15: return 'background-color: #ffcccc'
-            elif val >= 8: return 'background-color: #ffff99'
-            else: return 'background-color: #ccffcc'
-        
-        df_display = df_display.style.applymap(color_riesgo, subset=['nivel_riesgo'])
-        
-        st.dataframe(df_display, use_container_width=True)
-        
-        # Exportar a Excel
-        if st.button("📥 Exportar a Excel"):
-            output = df.to_excel("riesgos.xlsx", index=False)
-            with open("riesgos.xlsx", "rb") as file:
-                st.download_button(
-                    label="Descargar Excel",
-                    data=file,
-                    file_name=f"riesgos_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
-                )
-    else:
-        st.info("No se encontraron riesgos con los filtros seleccionados")
+    # Configuración de columnas para visualización profesional
+    st.dataframe(
+        df,
+        use_container_width=True,
+        column_order=[
+            "codigo", "area", "puesto_trabajo", "peligro", "nivel_riesgo", 
+            "evaluacion_riesgo", "estado", "proxima_revision"
+        ],
+        column_config={
+            "codigo": "Cód.",
+            "area": "Área",
+            "puesto_trabajo": "Puesto",
+            "peligro": "Peligro Identificado",
+            "nivel_riesgo": st.column_config.NumberColumn(
+                "Nivel (PxS)",
+                help="Probabilidad x Severidad"
+            ),
+            "evaluacion_riesgo": st.column_config.TextColumn(
+                "Evaluación",
+                width="medium"
+            ),
+            "estado": st.column_config.SelectboxColumn(
+                "Estado",
+                options=["pendiente", "en_mitigacion", "controlado"],
+                width="small"
+            ),
+            "proxima_revision": "Rev. Progr."
+        },
+        hide_index=True
+    )
+    
+    # Botón descarga
+    st.download_button(
+        "📥 Descargar Matriz Excel/CSV",
+        data=df.to_csv(index=False).encode('utf-8'),
+        file_name=f"matriz_iperc_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
 
 def dashboard_riesgos():
-    """Visualización en tiempo real"""
+    """Dashboard Ejecutivo de Riesgos"""
+    st.markdown("## 📊 Dashboard de Seguridad (IPERC)")
+    st.markdown("---")
     
     supabase = get_supabase_client()
     data = supabase.table('riesgos').select('*').execute().data
     
     if not data:
-        st.warning("No hay datos para mostrar")
+        st.warning("No hay datos suficientes para el dashboard")
         return
-    
+        
     df = pd.DataFrame(data)
     
-    # Gráfico 1: Riesgos por Área
-    fig1 = px.bar(
-        df.groupby('area').size().reset_index(name='cantidad'),
-        x='area', y='cantidad',
-        title="Riesgos por Área",
-        color='cantidad'
-    )
-    st.plotly_chart(fig1, use_container_width=True)
+    # KPIs Superiores
+    k1, k2, k3, k4 = st.columns(4)
     
-    # Gráfico 2: Distribución por Nivel
-    df['rango_riesgo'] = pd.cut(df['nivel_riesgo'], 
-                                bins=[0, 7, 14, 25], 
-                                labels=['Bajo', 'Medio', 'Alto'])
-    fig2 = px.pie(
-        df['rango_riesgo'].value_counts(),
-        names=df['rango_riesgo'].value_counts().index,
-        values=df['rango_riesgo'].value_counts().values,
-        title="Distribución de Nivel de Riesgo"
+    total = len(df)
+    altos = len(df[df['evaluacion_riesgo'] == 'Riesgo Alto'])
+    pendientes = len(df[df['estado'] == 'pendiente'])
+    
+    k1.metric("Total Riesgos Identificados", total, border=True)
+    k2.metric("Riesgos Críticos (Altos)", altos, delta="Atención" if altos > 0 else "Ok", delta_color="inverse", border=True)
+    k3.metric("Controles Pendientes", pendientes, delta="Requiere Acción" if pendientes > 0 else "Al día", delta_color="inverse", border=True)
+    
+    # Área con más riesgos
+    area_top = df['area'].value_counts().idxmax() if not df.empty else "N/A"
+    k4.metric("Área Más Crítica", area_top, border=True)
+    
+    st.markdown("### 📈 Análisis Gráfico")
+    
+    col_g1, col_g2 = st.columns(2)
+    
+    with col_g1:
+        # Gráfico de Pastel: Distribución por Nivel de Riesgo
+        fig_pie = px.pie(
+            df, 
+            names='evaluacion_riesgo', 
+            title='Distribución por Nivel de Riesgo',
+            color='evaluacion_riesgo',
+            color_discrete_map={
+                'Riesgo Alto': '#ef4444',  # Rojo
+                'Riesgo Medio': '#f59e0b', # Naranja
+                'Riesgo Bajo': '#10b981'   # Verde
+            },
+            hole=0.4
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+    with col_g2:
+        # Gráfico de Barras: Riesgos por Área y Estado
+        fig_bar = px.bar(
+            df, 
+            x='area', 
+            color='estado',
+            title='Estado de Controles por Área',
+            barmode='group',
+            color_discrete_map={
+                'pendiente': '#ef4444',
+                'en_mitigacion': '#3b82f6',
+                'controlado': '#10b981'
+            }
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # Mapa de Calor (Heatmap) Simulado con Scatter
+    st.markdown("### 🔥 Mapa de Calor de Riesgos")
+    fig_heat = px.density_heatmap(
+        df, 
+        x="probabilidad", 
+        y="severidad", 
+        z="nivel_riesgo", 
+        nbinsx=5, 
+        nbinsy=5,
+        title="Concentración de Riesgos (Probabilidad vs Severidad)",
+        text_auto=True,
+        color_continuous_scale="Reds"
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    fig_heat.update_layout(xaxis_title="Probabilidad", yaxis_title="Severidad")
+    st.plotly_chart(fig_heat, use_container_width=True)
