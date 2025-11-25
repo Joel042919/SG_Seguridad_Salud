@@ -1,7 +1,16 @@
+# Entornos virtuales
 venv/
+.venv/
 
+# Variables de entorno
 .env
+
+# Config local de Streamlit (si no quieres versionarla)
 .streamlit/
-app/__pycache__
-app/modules/__pycache__
-app/utils/__pycache__
+
+# Cachés de Python
+__pycache__/
+app/__pycache__/
+app/modules/__pycache__/
+app/utils/__pycache__/
+*.py[cod]
