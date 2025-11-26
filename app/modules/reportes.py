@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,date
 from app.utils.supabase_client import get_supabase_client
 from app.auth import requerir_rol
 import io
@@ -13,9 +13,12 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 import base64
+import os
 import json
 import requests
 from app.utils.storage_helper import subir_archivo_storage
+from dotenv import load_dotenv
+load_dotenv()
 
 def mostrar(usuario):
     """Módulo de Reportes Legales y Estadísticos (Ley 29783 Art. 24)"""
@@ -121,7 +124,12 @@ def cargar_datos_reporte(filtros):
             query_incidentes = query_incidentes.in_('tipo', filtros['tipos_incidente'])
         
         incidentes = query_incidentes.execute().data
+        df_incidentes = pd.DataFrame(incidentes) if incidentes else pd.DataFrame()
         
+        # Aplanar usuarios en incidentes
+        if not df_incidentes.empty and 'usuarios' in df_incidentes.columns:
+            df_incidentes['nombre_completo'] = df_incidentes['usuarios'].apply(lambda x: x.get('nombre_completo') if x else 'Sin Asignar')
+            
         # Cargar riesgos
         query_riesgos = supabase.table('riesgos').select('*, usuarios(nombre_completo)').gte(
             'nivel_riesgo', filtros['nivel_riesgo_min']
@@ -130,27 +138,46 @@ def cargar_datos_reporte(filtros):
             query_riesgos = query_riesgos.in_('area', filtros['areas'])
         riesgos = query_riesgos.execute().data
         
+        df_riesgos = pd.DataFrame(riesgos) if riesgos else pd.DataFrame()
+        
+        
         # Cargar EPP
         epp = supabase.table('epp_asignaciones').select('*, usuarios(nombre_completo), epp_catalogo(*)').execute().data
         
+        df_epp = pd.DataFrame(epp) if epp else pd.DataFrame()
+        
+        # Aplanar EPP: Extraer nombre del usuario y nombre del EPP
+        if not df_epp.empty:
+            if 'usuarios' in df_epp.columns:
+                df_epp['nombre_completo'] = df_epp['usuarios'].apply(lambda x: x.get('nombre_completo') if x else '')
+            
+            # Asumiendo que epp_catalogo tiene un campo 'nombre' (basado en tu SQL function)
+            if 'epp_catalogo' in df_epp.columns:
+                df_epp['epp_nombre'] = df_epp['epp_catalogo'].apply(lambda x: x.get('nombre') if x else 'Desconocido')
+        
         # Cargar capacitaciones
         capacitaciones = supabase.table('capacitaciones').select('*, asistentes_capacitacion(*)').execute().data
+        df_capacitaciones = pd.DataFrame(capacitaciones) if capacitaciones else pd.DataFrame()
         
         # Cargar inspecciones y hallazgos
         inspecciones = supabase.table('inspecciones').select('*, checklists(*)').execute().data
+        df_inspecciones = pd.DataFrame(inspecciones) if inspecciones else pd.DataFrame()
+        
         hallazgos = supabase.table('hallazgos').select('*, usuarios(nombre_completo)').execute().data
+        df_hallazgos = pd.DataFrame(hallazgos) if hallazgos else pd.DataFrame()
         
         # Cargar documentos
         documentos = supabase.table('documentos').select('*, usuarios(nombre_completo)').execute().data
+        df_documentos = pd.DataFrame(documentos) if documentos else pd.DataFrame()
         
         return {
-            'incidentes': pd.DataFrame(incidentes) if incidentes else pd.DataFrame(),
-            'riesgos': pd.DataFrame(riesgos) if riesgos else pd.DataFrame(),
-            'epp': pd.DataFrame(epp) if epp else pd.DataFrame(),
-            'capacitaciones': pd.DataFrame(capacitaciones) if capacitaciones else pd.DataFrame(),
-            'inspecciones': pd.DataFrame(inspecciones) if inspecciones else pd.DataFrame(),
-            'hallazgos': pd.DataFrame(hallazgos) if hallazgos else pd.DataFrame(),
-            'documentos': pd.DataFrame(documentos) if documentos else pd.DataFrame()
+            'incidentes': df_incidentes,
+            'riesgos': df_riesgos,
+            'epp': df_epp,
+            'capacitaciones': df_capacitaciones,
+            'inspecciones': df_inspecciones,
+            'hallazgos': df_hallazgos,
+            'documentos': df_documentos
         }
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
@@ -382,7 +409,7 @@ def mostrar_exportar_enviar(data, filtros):
         st.markdown("### 📧 Enviar Automáticamente")
         st.info("Enviar reporte vía n8n a emails configurados")
         
-        email_destino = st.text_input("Email destino", "gerencia@empresa.com")
+        email_destino = st.text_input("Email destino", "example@empresa.com")
         frecuencia_envio = st.selectbox("Frecuencia", ["Diario", "Semanal", "Mensual"])
         
         if st.button("📨 Configurar Envio Automático", type="secondary"):
@@ -537,28 +564,41 @@ def configurar_webhook_n8n(data, filtros, email, frecuencia):
     """Configurar webhook para envío automático"""
     supabase = get_supabase_client()
     
+    filtros_serializables = filtros.copy()
+    
+    # Convertimos los objetos 'date' a texto ISO (Ej: "2023-11-25")
+    if isinstance(filtros_serializables.get('fecha_inicio'), (datetime, date)):
+        filtros_serializables['fecha_inicio'] = filtros_serializables['fecha_inicio'].isoformat()
+        
+    if isinstance(filtros_serializables.get('fecha_fin'), (datetime, date)):
+        filtros_serializables['fecha_fin'] = filtros_serializables['fecha_fin'].isoformat()
+    # --------------------------------------------------------
+    
     try:
         # Guardar configuración en Supabase (tabla configuraciones_reportes)
         config = {
             'email_destino': email,
             'frecuencia': frecuencia,
-            'filtros': json.dumps(filtros),
+            'filtros': json.dumps(filtros_serializables),
             'activo': True,
             'ultimo_envio': None
         }
         
-        supabase.table('configuraciones_reportes').upsert(config).execute()
+        resultado = supabase.table('configuraciones_reportes').upsert(config).execute()
+        config_id = resultado.data[0]['id'] if resultado.data else "ID_PENDIENTE"
         
         # Disparar webhook de n8n para validación
         requests.post(
-            st.secrets["N8N_WEBHOOK_URL"] + "/configurar-reporte-automatico",
+            os.getenv("N8N_WEBHOOK_URL") + "/configurar-reporte-automatico",
             json={
                 'email': email,
                 'frecuencia': frecuencia,
-                'filtros': filtros,
-                'config_id': config.get('id')
+                'filtros': json.dumps(filtros_serializables),
+                'config_id': config_id
             }
         )
+        
+        st.success("✅ Webhook configurado. El reporte se enviará automáticamente.")
     except Exception as e:
         st.error(f"Error configurando webhook: {e}")
 

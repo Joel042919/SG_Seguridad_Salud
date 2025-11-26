@@ -519,6 +519,16 @@ def notificar_revision_documento(data):
     except:
         pass
 
+# Función auxiliar (defínela fuera o usa una lambda compleja, pero esto es más limpio)
+def obtener_etiqueta_documento(df, id_doc):
+    try:
+        # Filtramos la fila correspondiente a este ID
+        fila = df[df['id'] == id_doc].iloc[0]
+        return f"{fila['codigo']} - {fila['titulo'][:40]}... ({fila['dias_restantes']} días)"
+    except:
+        return f"ID: {id_doc}"
+
+
 def alertas_vencimientos(usuario):
     """Alertas de documentos por vencer o vencidos"""
     
@@ -555,8 +565,8 @@ def alertas_vencimientos(usuario):
     ).lte('fecha_vigencia', datetime.now().date() + timedelta(days=30)).execute().data
     
     if documentos_criticos:
-        df_criticos = pd.DataFrame(documentos_criticos)
-        df_criticos['dias_restantes'] = (pd.to_datetime(df_criticos['fecha_vigencia']).dt.date - datetime.now().date()).apply(lambda x: x.days)
+        documentos_criticos = pd.DataFrame(documentos_criticos)
+        documentos_criticos['dias_restantes'] = (pd.to_datetime(documentos_criticos['fecha_vigencia']).dt.date - datetime.now().date()).apply(lambda x: x.days)
         
         # Colorear por urgencia
         def colorear_urgencia(row):
@@ -569,7 +579,7 @@ def alertas_vencimientos(usuario):
             else:
                 return [''] * len(row)
         
-        df_display = df_criticos[['codigo', 'titulo', 'tipo', 'area', 'fecha_vigencia', 'dias_restantes', 'estado']]
+        df_display = documentos_criticos[['codigo', 'titulo', 'tipo', 'area', 'fecha_vigencia', 'dias_restantes', 'estado']]
         
         styled = df_display.style.apply(colorear_urgencia, axis=1)
         st.dataframe(styled, use_container_width=True)
@@ -578,11 +588,14 @@ def alertas_vencimientos(usuario):
     
     # Programar revisión
     st.markdown("### 📅 Programar Revisión Manual")
+    df_ordenado = documentos_criticos.sort_values('dias_restantes')
     
     doc_a_revisar = st.selectbox(
         "Seleccionar documento para programar revisión",
-        options=sorted([d['id'] for d in documentos_criticos], key=lambda x: [d['dias_restantes'] for d in documentos_criticos if d['id'] == x][0] if documentos_criticos else 0),
-        format_func=lambda x: f"{[d['codigo'] for d in documentos_criticos if d['id'] == x][0]} - {[d['titulo'] for d in documentos_criticos if d['id'] == x][0][:50]}... ({[d['dias_restantes'] for d in documentos_criticos if d['id'] == x][0]} días)"
+        # Pasamos directamente la columna 'id' del DF ordenado
+        options=df_ordenado['id'].tolist(),
+        # Usamos una función lambda optimizada para Pandas
+        format_func=lambda id_seleccionado: obtener_etiqueta_documento(df_ordenado, id_seleccionado)
     )
     
     if doc_a_revisar:
@@ -697,6 +710,7 @@ def generar_reporte_vencimiento(supabase):
     
     df = pd.DataFrame(documentos)
     df['dias_restantes'] = (pd.to_datetime(df['fecha_vigencia']).dt.date - datetime.now().date()).apply(lambda x: x.days)
+    st.write((pd.to_datetime(df['fecha_vigencia']).dt.date - datetime.now().date()).apply(lambda x: x.days))
     
     df_export = df[['codigo', 'titulo', 'tipo', 'area', 'fecha_vigencia', 'dias_restantes', 'usuarios']]
     df_export['responsable'] = df_export['usuarios'].apply(lambda x: x['nombre_completo'])
